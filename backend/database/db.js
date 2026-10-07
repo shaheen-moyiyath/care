@@ -12,8 +12,11 @@ async function initDatabase() {
   const host = process.env.DB_HOST || 'localhost';
   const user = process.env.DB_USER || 'root';
   const password = process.env.DB_PASSWORD || '';
-  const database = process.env.DB_NAME || 'opas_db';
-  const port = process.env.DB_PORT || 3306;
+  const database = process.env.DB_NAME || 'defaultdb';
+  const port = parseInt(process.env.DB_PORT || '3306', 10);
+  const useSsl = process.env.DB_SSL === 'true' || process.env.DB_SSL === 'REQUIRED' || port !== 3306;
+
+  const sslConfig = useSsl ? { rejectUnauthorized: false } : undefined;
 
   // Attempt MySQL connection first
   try {
@@ -22,36 +25,26 @@ async function initDatabase() {
       user,
       password,
       port,
+      database,
+      ssl: sslConfig,
       waitForConnections: true,
       connectionLimit: 10,
       queueLimit: 0,
-      connectTimeout: 2000
+      connectTimeout: 5000
     });
 
     // Test connection
     const [rows] = await tempPool.query('SELECT 1 as test');
     if (rows && rows[0]?.test === 1) {
-      await tempPool.query(`CREATE DATABASE IF NOT EXISTS \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-      await tempPool.end();
-
-      pool = mysql.createPool({
-        host,
-        user,
-        password,
-        database,
-        port,
-        waitForConnections: true,
-        connectionLimit: 10,
-        queueLimit: 0
-      });
+      pool = tempPool;
       dbDriver = 'mysql';
-      console.log('✅ Connected to MySQL database:', database);
+      console.log('✅ Connected to Cloud MySQL database:', database, 'on', host);
       await createTablesMySQL();
       await seedInitialData();
       return;
     }
   } catch (err) {
-    console.warn('⚠️ MySQL not accessible (', err.message, '). Falling back to embedded SQLite database for zero-friction execution.');
+    console.warn('⚠️ Cloud MySQL connection error (', err.message, '). Falling back to embedded SQLite database.');
   }
 
   // Fallback to SQLite
@@ -132,7 +125,11 @@ async function createTablesMySQL() {
   ];
 
   for (const q of queries) {
-    await pool.query(q);
+    try {
+      await pool.query(q);
+    } catch (e) {
+      console.error('MySQL Table init warning:', e.message);
+    }
   }
 }
 
@@ -207,7 +204,7 @@ async function createTablesSQLite() {
 async function seedInitialData() {
   // Check if admin exists
   const admins = await query('SELECT * FROM Admin LIMIT 1');
-  if (admins.length > 0) return; // Already seeded
+  if (admins && admins.length > 0) return; // Already seeded
 
   console.log('🌱 Seeding initial demo data for OPAS...');
 
@@ -221,7 +218,7 @@ async function seedInitialData() {
     ['Chief Administrator', 'admin@hospital.org', hashedAdminPass]
   );
 
-  // 2. Doctors across 4 core specializations: Cardiology, Neurology, Orthopedics, Dermatology
+  // 2. Doctors across 4 core specializations
   const doctors = [
     {
       name: 'Dr. Sarah Al-Mansoor',
@@ -377,7 +374,6 @@ async function seedInitialData() {
     ]
   );
 
-  // 5. Sample Notifications
   const appoId1 = app1.insertId || 1;
   const appoId2 = app2.insertId || 2;
 
