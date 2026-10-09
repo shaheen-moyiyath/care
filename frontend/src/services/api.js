@@ -1,7 +1,12 @@
 import axios from 'axios';
 
+// Use environment variable if deployed (e.g. Vercel pointing to Render), fallback to relative '/api' for local dev proxy
+const apiBaseUrl = import.meta.env.VITE_API_URL 
+  ? (import.meta.env.VITE_API_URL.endsWith('/api') ? import.meta.env.VITE_API_URL : `${import.meta.env.VITE_API_URL}/api`)
+  : '/api';
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: apiBaseUrl,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -25,7 +30,6 @@ api.interceptors.response.use(
   (error) => {
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
       if (error.response.data?.message?.includes('token') || error.response.status === 401) {
-        // Token expired or invalid
         localStorage.removeItem('opas_token');
         localStorage.removeItem('opas_user');
       }
